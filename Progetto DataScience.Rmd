@@ -1,0 +1,390 @@
+---
+title: "Presentazione DataScience"
+author: "Lorenzo Mian"
+date: "27/6/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+  knitr::opts_chunk$set(echo = TRUE)
+  library(data.table)
+  library(dplyr)
+  library(ggplot2)
+  library(tidyr)
+  library(readr)
+```
+
+## Caricamento Dataset
+
+Seleziono le informazioni che mi servono dai dataset iniziali e li salvo
+in formato csv. Seleziono tre Dataset principali:
+ 1 titleBasics: contenente la lista completa di tutti i contenuti audiovisivi
+ 2 titleRatings: contenente la media dei voti dati su IMDB
+ 3 nameBasic: contenente gli uomini e donne che operano nel mondo dello spettacolo
+
+```{r}
+# 1)  Contiene la ciapli lista di tutti i film presenti nel dataset
+#     e per ognuno di essi il titolo, il titolo orginale,
+#     se è per adulti, anno di uscita, la durata e da uno a tre generi
+
+  film = fread(file="titleBasics.tsv", quote="", na="\\N")
+  
+  film = film%>%
+    rename(IDFilm=tconst)%>%
+    rename(titolo=primaryTitle)%>%
+    rename(titoloOriginale=originalTitle)%>%
+    rename(annoUscita=startYear)%>%
+    rename(durata=runtimeMinutes)%>%
+    rename(generi=genres)%>%
+    filter(titleType=="movie")%>%
+    filter(isAdult==0)%>%
+    filter(annoUscita<=2021)%>%
+    select(-titleType, -endYear, -isAdult)
+  
+  write_csv(film, "film.csv")
+  
+```
+
+```{r}
+# 2)  Contiene per ogni film il relativo numero di voti e la loro 
+#     media complessiva (da 1 a 10)
+
+  voti = fread(file="titleRatings.tsv", quote="", na="\\N")
+  
+  voti = voti%>%
+    rename(IDFilm=tconst)%>%
+    rename(mediaVoti=averageRating)%>%
+    rename(numeroVoti=numVotes)
+  
+  write_csv(voti, "voti.csv")
+  
+```
+
+```{r}
+## Unisco film e voti in un'unica tabella
+
+  film = read.csv("film.csv")
+  voti = read.csv("voti.csv")
+  
+  filmConVoto = inner_join(film, voti, by=c( "IDFilm" = "IDFilm"))
+  write.csv(filmConVoto, "filmConVoto.csv")
+  
+```
+
+```{r}
+# 3)  Contiene la lista degli attori e registi dei film presenti nei dataset.
+#     Per ogni persona conserviamo il nome, anno di nascita e morte,
+#     le altre sue professioni, e 4 film per cui sono conosciuti
+
+  persone = fread(file="nameBasics.tsv", quote="", na="\\N")
+  
+  persone = persone %>%
+    rename(IDPersonaggio=nconst) %>%
+    rename(nome=primaryName) %>%
+    rename(annoNascita=birthYear) %>%
+    rename(annoMorte=deathYear) %>%
+    rename(professione=primaryProfession) 
+  
+  persone = persone %>% filter(grepl('actor|actress|director', professione))
+  
+  persone = separate(persone, knownForTitles, into = c("film1","film2","film3","film4"),
+                    sep=",", fill="right")
+    
+  write_csv(persone, "persone.csv")
+
+```
+
+## Generi dei film
+
+Studio che generi di film sono presenti nel dataset e controllo come sono 
+distribuiti.
+
+```{r}
+
+  frequenzaGeneri = read_csv("film.csv", col_types = cols()) %>% 
+      select(generi)
+
+#   Occorre dividere in tre colonne in quanto nel dataset originale
+#   ogni film poteva avere fino a tre generi
+
+  frequenzaGeneri = separate(frequenzaGeneri, generi, 
+                        into=c("gen1","gen2","gen3"), sep=",", fill = "right")
+
+  col1=data.frame("gen" = frequenzaGeneri$gen1) %>%
+    group_by(gen) %>%
+    count(gen)
+  
+  col2=data.frame("gen" = frequenzaGeneri$gen2) %>%
+    group_by(gen) %>%
+    count(gen)
+  
+  col3=data.frame("gen" = frequenzaGeneri$gen3) %>%
+    group_by(gen) %>%
+    count(gen)
+  
+  totale = full_join(col1, col2, by= c("gen" = "gen"))
+  totale = full_join(totale, col3, by= c("gen" = "gen"))
+  totale = totale %>%
+    mutate(n.x = coalesce(n.x, 0),
+           n.y = coalesce(n.y, 0),
+           n = coalesce(n, 0))%>%
+    rename("Genere"=gen)
+  
+  totale = totale %>% 
+    mutate(N = (n.x + n.y + n)) %>% 
+    select(Genere, N)
+  
+  distribuzioneGeneri = subset(totale, Genere!="NA")
+  
+  write_csv(distribuzioneGeneri, "distrGeneri.csv")
+  
+```
+
+## Voti
+Studio il numero dei voti e la loro distribuzione 
+
+```{r}
+  voti = read_csv("voti.csv", col_types = cols()) %>%
+    arrange(-mediaVoti, -numeroVoti) %>%
+    select(IDFilm, mediaVoti, numeroVoti)
+  
+  distribuzioneVoti = voti %>%
+    group_by(mediaVoti) %>%
+    count(mediaVoti) %>%
+    rename("occorrenze"=n) %>%
+    select(mediaVoti, occorrenze)
+  
+  write_csv(distribuzioneVoti, "distrVoti.csv")
+
+```
+
+## Film migliori
+Salvo la Top 200 dei film con media voto più alta
+che abbiano almeno 50 voti
+
+```{r}
+  filmConVoto = read_csv("filmConVoto.csv", col_types = cols())
+  
+  top200 = filmConVoto %>% 
+    filter(numeroVoti>5000) %>%
+    arrange(-mediaVoti)%>%
+    top_n(200) %>%
+    select(IDFilm, titolo, mediaVoti, generi, annoUscita)
+
+  write.csv(top200, "top200.csv")
+
+```
+
+## Durata rispetto all'anno di uscita
+Studio una possibile correlazione tra la durata del film e il suo anno
+di uscita nelle sale
+
+```{r}
+  film = read_csv("film.csv", col_types = cols())
+  
+  durataPerAnno = film %>% 
+    select(annoUscita, durata) %>%
+    filter(durata!="NA" & annoUscita<=2021 & annoUscita>=1920)%>%
+    group_by(annoUscita)%>%
+    summarise(mediaDurate=round(mean(durata)))
+    
+  write_csv(durataPerAnno, "durataPerAnno.csv")
+
+```
+
+## Film per ogni anno
+Conto quanti film sono contenuti nel dataset per ogni anno
+
+```{r}
+  film = read_csv("film.csv", col_types = cols())
+
+  filmAnno = film %>%
+    select(annoUscita)%>%
+    count(annoUscita)%>%
+    filter(annoUscita<2022 & annoUscita!="NA")
+
+  write_csv(filmAnno, "filmAnno.csv")
+  
+```
+
+## Voto rispetto al genere
+Studio i generi che hanno media voto più alta
+
+```{r}
+  genereVoto= read_csv("filmConVoto.csv", col_types = cols()) %>%
+    select(generi, mediaVoti)
+
+  genereVoto = separate(genereVoto, generi, 
+                        into=c("gen1","gen2","gen3"), sep=",", fill = "right")
+
+  col1=data.frame("gen" = genereVoto$gen1, "mediaVoti" = genereVoto$mediaVoti) %>%
+    group_by(gen) %>%
+    summarise(mediaA=round(mean(mediaVoti), digits = 2))
+   
+  col2=data.frame("gen" = genereVoto$gen2, "mediaVoti" = genereVoto$mediaVoti) %>%
+    group_by(gen) %>%
+    summarise(mediaB=round(mean(mediaVoti), digits = 2))
+  
+  col3=data.frame("gen" = genereVoto$gen3, "mediaVoti" = genereVoto$mediaVoti) %>%
+    group_by(gen) %>%
+    summarise(mediaC=round(mean(mediaVoti), digits = 2))
+  
+  totale = full_join(col1, col2, by= c("gen" = "gen"))
+  totale = full_join(totale, col3, by= c("gen" = "gen"))
+  
+  totale$media = round(rowMeans(subset(totale, select = c(mediaA, mediaB, mediaC)), na.rm = TRUE), digits = 2)
+  
+  genereInBaseAlVoto = subset(totale, gen!="NA")%>%
+    arrange(media)%>%
+    rename("Genere"=gen)%>%
+    select(Genere, media)
+  
+  write_csv(genereInBaseAlVoto, "genereInBaseAlVoto.csv")
+  
+```
+
+## Voto rispetto alla durata
+Studio se la durata di un film influenza il voto
+
+```{r}
+  durataPerVoto = read_csv("filmConVoto.csv", col_types = cols()) %>%
+    select(mediaVoti, durata) %>%
+    filter(durata<240) %>% #4 ore
+    group_by(mediaVoti) %>%
+    summarise(durataMedia=round(mean(durata), digits=2))
+  
+  write_csv(durataPerVoto, "durataPerVoto.csv")
+
+```
+
+## Suddivisione delle professioni tra uomini e donne
+Osservo la come sono suddivise le professioni all'interno del dataset
+
+```{r}
+  attori = read_csv("persone.csv", col_types = cols()) %>% select(IDPersonaggio, nome, professione,)
+
+  M = attori %>% filter(grepl("actor", professione))
+  F = attori %>% filter(grepl("actress", professione))
+  
+  write_csv(M,"M.csv")
+  write_csv(F,"F.csv")
+  
+  maschi = read_csv("M.csv", col_types = cols())
+  femmine = read_csv("F.csv", col_types = cols())
+  
+  nM = nrow(maschi)
+  nF = nrow(femmine)
+  
+  nmRegisti = nrow(maschi%>%filter(grepl("director", professione)))
+  nfRegisti = nrow(femmine%>%filter(grepl("director", professione)))
+
+  nmProduttore = nrow(maschi%>%filter(grepl("producer", professione)))
+  nfProduttore = nrow(femmine%>%filter(grepl("producer", professione)))
+  
+  nmSoundtrack = nrow(maschi%>%filter(grepl("soundtrack", professione)))
+  nfSoundtrack = nrow(femmine%>%filter(grepl("soundtrack", professione)))
+  
+  nmAutore = nrow(maschi%>%filter(grepl("writer", professione)))
+  nfAutore = nrow(femmine%>%filter(grepl("writer", professione)))
+  
+  nmCostumi = nrow(maschi%>%filter(grepl("costume_department", professione)))
+  nfCostumi = nrow(femmine%>%filter(grepl("costume_department", professione)))
+  
+  nmEffettiSpeciali = nrow(maschi%>%filter(grepl("special_effects", professione)))
+  nfEffettiSpeciali = nrow(femmine%>%filter(grepl("special_effects", professione)))
+  
+  nmTrucco = nrow(maschi%>%filter(grepl("make_up_department", professione)))
+  nfTrucco = nrow(femmine%>%filter(grepl("make_up_department", professione)))
+  
+  nmMusica = nrow(maschi%>%filter(grepl("music_department", professione)))
+  nfMusica = nrow(femmine%>%filter(grepl("music_department", professione)))
+  
+  nmVario = nrow(maschi%>%filter(grepl("miscellaneous", professione)))
+  nfVario = nrow(femmine%>%filter(grepl("miscellaneous", professione)))
+  
+  maschile = c(nmRegisti, nmProduttore, nmSoundtrack, nmAutore, nmCostumi, 
+              nmEffettiSpeciali, nmTrucco, nmMusica, nmVario)
+  femminile = c(nfRegisti, nfProduttore, nfSoundtrack, nfAutore, nfCostumi, 
+              nfEffettiSpeciali, nfTrucco, nfMusica, nfVario)
+  genere = c("Registi", "Produttori", "SoundTrack", "Scrittori", "Costumi",
+             "FX", "Trucco", "Musica", "altro")
+  distribuzioneprofessioni = data.frame(genere, 
+                                        "Uomini" = round( ((maschile/nM)*1000), 
+                                                          digits = 2),
+                                        "Donne" = round(((femminile/nF)*1000), 
+                                                        digits = 2))
+    
+  write_csv(distribuzioneprofessioni%>%rename("Professione"=genere), "distribuzioneProfessioni.csv")
+  
+```
+
+## Film con più votazioni
+Cerco i film che hanno avuto più votazioni
+
+```{r}
+  filmPiùVotati = read_csv("filmConVoto.csv", col_types = cols()) %>%
+    select(titolo, numeroVoti) %>%
+    arrange(-numeroVoti)
+
+  write_csv(filmPiùVotati, "filmPiùVotati.csv")
+```
+
+## Migliori film rispetto al relativo cast
+Ricerco la quantità di attori/registi nei migliori 1000 film e li divido
+per sesso
+
+```{r}
+   attoriPerFilm = read_csv("top200.csv", col_types = cols()) %>% 
+      select(IDFilm,titolo, mediaVoti)
+  
+  attori = read_csv("persone.csv", col_types = cols())
+  
+  donne = attori %>%
+    filter( grepl("actress", professione)) %>%
+    select(nome, film1, film2, film3, film4)
+    
+  uomini = attori %>%
+    filter( grepl("actor", professione)) %>%
+    select(nome, film1, film2, film3, film4)
+  
+  aF = c()
+  aM = c()
+  
+  for( film in attoriPerFilm$IDFilm) {
+    f1 = nrow(donne %>% 
+      filter(film1==film))
+    f2 = nrow(donne %>% 
+      filter(film2==film))
+    f3 = nrow(donne %>%
+      filter(film3==film))
+    f4 = nrow(donne %>% 
+      filter(film4==film))
+    x = f1 + f2 + f3 + f4
+    aF = c(aF, x)
+    
+    f1 = nrow(uomini %>% 
+      filter(film1==film))
+    f2 = nrow(uomini %>% 
+      filter(film2==film))
+    f3 = nrow(uomini %>%
+      filter(film3==film))
+    f4 = nrow(uomini %>% 
+      filter(film4==film))
+    x = f1 + f2 + f3 + f4
+    aM = c(aM, x)
+  }
+  attoriPerFilm$Attrici = aF
+  attoriPerFilm$Attori = aM
+```
+
+```{r}
+  attoriPerFilm = attoriPerFilm %>% 
+    mutate("totale"=Attrici + Attori)%>%
+    mutate("PercDonne"= Attrici/totale*100)%>%
+    select(titolo, Attrici, Attori, PercDonne)
+  
+  write_csv(attoriPerFilm, "attoriPerFilm.csv")
+```
+
+
+

@@ -12,7 +12,10 @@ output: html_document
   library(ggplot2)
   library(tidyr)
   library(readr)
+  library(stringr)
+  library(tidytext)
 ```
+
 
 ## Caricamento Dataset
 
@@ -139,7 +142,33 @@ distribuiti.
   write_csv(distribuzioneGeneri, "distrGeneri.csv")
   
 ```
+## Analisi Titoli
+```{r}
+  film = read_csv("film.csv", col_types = cols())
 
+  titoli = data.frame("n" = 1:nrow(film), film%>%select(titolo))
+  
+  titoli = unnest_tokens(titoli, "word", titolo)
+  
+  stop_wordsES = read_csv("stopWordsES.csv", col_types = cols())
+  stop_wordsDE = read_csv("stopWordsDE.csv", col_types = cols())
+  stop_wordsIT = read_csv("stopWordsIT.csv", col_types = cols())
+  
+  titoli = anti_join( titoli, stop_words, by="word")
+    
+  titoli = anti_join( titoli, stop_wordsDE, by="word")
+  
+  titoli = anti_join( titoli, stop_wordsIT, by="word")
+  
+  titoli = anti_join( titoli, stop_wordsES, by="word") %>%
+    filter(!grepl("ã", word))%>%
+    group_by(word) %>%
+    count(word, sort = TRUE)
+  
+  write_csv(titoli, "titoli.csv")
+  
+
+```
 ## Voti
 Studio il numero dei voti e la loro distribuzione 
 
